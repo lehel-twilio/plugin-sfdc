@@ -12,6 +12,7 @@ The Salesforce ClickToDial functionality invokes the Twilio functions created by
 
 In order to load multiple plugins while developing this plugin, modify /public/plugins.json to include both plugins, like this:
 
+```
 [
   {
     "name": "SfdcPlugin",
@@ -36,3 +37,4 @@ In order to load multiple plugins while developing this plugin, modify /public/p
     "src": "https://your-twilio-domain/assets/plugin-dialpad.js"
   }
 ]
+```
