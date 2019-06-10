@@ -6,83 +6,89 @@ export class SFDCIntegration {
     this.manager = manager;
     this.isLightning = isLightning;
     this.sfdcBaseUrl = window.location.ancestorOrigins[0];
-    this.sfApi = isLightning ? window.sforce.opencti : window.sforce.interaction;
   }
 
   async init() {
     const sfdcUrl = this.isLightning ? `${this.sfdcBaseUrl}/support/api/45.0/lightning/opencti_min.js` : `${this.sfdcBaseUrl}/support/api/46.0/interaction.js`;
     await initiateOpenCTI(sfdcUrl);
+
+    this.sfApi = this.isLightning ? window.sforce.opencti : window.sforce.interaction;
+
+    //Initialize Click to Call
+    this.isLightning ? this.lightningClickToCall() : this.classicClickToCall();
   }
 
   classicClickToCall() {
     console.log('Running Classic Click to Call function');
+
+    this.sfApi.enableClickToDial({callback: (response) => {
+      if (response.success) {
+        console.log('enableClickToDial method call executed successfully! returnValue:', response.result);
+      } else {
+        console.error('Something went wrong calling enableClickToDial! Errors:', response.error);
+      }
+    }});
+
+    this.sfApi.onClickToDial({listener: (response) => {
+      console.log(`Calling ${response.result}`);
+    }});
   }
 
   lightningClickToCall() {
     console.log('Running Lightning Click to Call function');
+
+    this.sfApi.enableClickToDial({callback: (response) => {
+      if (response.success) {
+        console.log('enableClickToDial method call executed successfully! returnValue:', response.returnValue);
+      } else {
+        console.error('Something went wrong calling enableClickToDial! Errors:', response.errors);
+      }
+    }});
+
+    this.sfApi.onClickToDial({listener: (payload) => {
+      console.log(`Calling ${payload.number}`);
+
+      fetch(`https://${this.manager.serviceConfiguration.runtime_domain}/create-new-task`, {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        method: 'POST',
+        body: `From=${this.manager.store.getState().flex.worker.attributes.phone}&To=${payload.number}&Worker=${this.manager.store.getState().flex.worker.attributes.contact_uri}&Internal=false&Token=${this.manager.store.getState().flex.session.ssoTokenPayload.token}`
+      })
+      .then(response => response.json())
+      .then(json => {
+        console.log('Outbound call dialed successfully');
+        console.log(json);
+      })
+    }});
   }
 
   classicLogActivity(payload) {
     console.log('Running Classic activity logger');
 
-    if (!payload.task) {
-      return;
-    }
-
-    const { attributes } = payload.task;
-    const { direction } = attributes;
-    let callType = this.CALL_TYPE.INBOUND;
-    let searchParameter = payload.task.attributes.name;
-    this.currentObjectId = null;
-    this.currentObjectType = null;
-
-    if (payload.task.taskChannelUniqueName === 'voice' && direction === 'outbound') {
-      callType = this.CALL_TYPE.OUTBOUND;
-      searchParameter = attributes.to;
-    }
-
-    if (attributes.sfdcSearchString && attributes.sfdcSearchString.trim()) {
-      searchParameter = attributes.sfdcSearchString;
-    }
-
-    this.sfApi.getPageInfo(response => {
-      const responseResult = response && response.result && JSON.parse(response.result);
-      const objectId = responseResult && responseResult.objectId;
-      const objectType = responseResult && responseResult.object;
-
-      if (typeof(payload.task.attributes.SFDCUrl) !== 'undefined') {
-        console.log('Calling screenPop function');
-        console.log(payload.task.attributes.SFDCUrl);
-        this.sfApi.screenPop(`/${taskPayload.task.attributes.SFDCUrl}`, true, result => {
-        })
-      } else {
-        this.sfApi.searchAndScreenPop(searchParameter, 'popReason=Flex', callType, result => {
-          const searchResult = result && result.result && JSON.parse(result.result);
-          const searchedRecordId = searchResult && Object.keys(searchResult).length === 1 && Object.keys(searchResult)[0];
-
-          if ((searchedRecordId && objectId === searchedRecordId) || (direction === 'outbound' && objectId && objectType)) {
-            const taskObj = { result: `{"${objectId}":{"object":"${objectType}"}}` };
-
-            return;
-          }
-        });
-      }
-    });
+    this.sfApi.saveLog('Task', `WhatID=${this.state.selectedCaseId}&Subject=Call&Description=4154561515`, result => {
+      console.log('Log successfully saved');
+      console.log(result);
+    })
   }
 
   lightningLogActivity(payload) {
     console.log('Running Lightning activity logger');
 
     if (typeof(payload.task) !== 'undefined') {
-      this.sfdcActivityId = this.props.task.attributes.sfdcActivityId;
+
+      const today = new Date();
+      const date = today.getFullYear() + '-' + (today.getMonth() + 1) + '-' + today.getDate();
+      const time = today.getHours() + ':' + today.getMinutes() + ':' + today.getSeconds();
+      const dateTime = date + ' ' + time;
 
       this.sfApi.saveLog({
         value: {
-          Id: this.sfdcActivityId,
-          param: value
+          entityApiName: 'Task',
+          Subject: `Test ${dateTime}`
         },
-        (success, returnValue, errors) => {
-          if success {
+        callback: (success, returnValue, errors) => {
+          if (success) {
             console.log('Successfully saved activity');
             console.log(returnValue);
           }
@@ -94,10 +100,40 @@ export class SFDCIntegration {
   classicScreenPop(payload) {
     console.log('Running Classic screenPop function');
 
-    this.sfApi.saveLog('Task', `WhatID=${this.state.selectedCaseId}&Subject=Call&Description=4154561515`, result => {
-      console.log('Log successfully saved');
-      console.log(result);
-    })
+    if (!payload.task) {
+      return;
+    }
+
+    const { attributes } = payload.task;
+    const { direction } = attributes;
+    let callType = this.sfApi.CALL_TYPE.INBOUND;
+    let searchParameter = payload.task.attributes.name;
+    this.currentObjectId = null;
+    this.currentObjectType = null;
+
+    if (payload.task.taskChannelUniqueName === 'voice' && direction === 'outbound') {
+      callType = this.sfApi.CALL_TYPE.OUTBOUND;
+      searchParameter = attributes.to;
+    }
+
+    if (attributes.sfdcSearchString && attributes.sfdcSearchString.trim()) {
+      searchParameter = attributes.sfdcSearchString;
+    }
+
+    this.sfApi.getPageInfo(response => {
+
+      if (typeof(payload.task.attributes.SFDCUrl) !== 'undefined') {
+        console.log('Calling screenPop function');
+        console.log(payload.task.attributes.SFDCUrl);
+        this.sfApi.screenPop(`/${payload.task.attributes.SFDCUrl}`, true, result => {
+        })
+      } else {
+        this.sfApi.searchAndScreenPop(searchParameter, 'popReason=Flex', callType, result => {
+          console.log('Hitting the callback function');
+          console.log(result);
+        });
+      }
+    });
   }
 
   lightningScreenPop(payload) {
@@ -107,28 +143,27 @@ export class SFDCIntegration {
       return;
     }
 
+    const { attributes } = payload.task;
     const { direction } = payload.task.attributes;
-    let taskType = this.CALL_TYPE.INBOUND;
-    let searchParameter = payload.task.attributes.name;
+    let taskType = this.sfApi.CALL_TYPE.INBOUND;
+    let searchParameter = attributes.name;
 
-    if (taskPayload.task.attributes.sfdcSearchString && taskPayload.task.attributes.sfdcSearchString.trim()) {
-      searchParameter = taskPayload.task.attributes.sfdcSearchString;
+    if (attributes.sfdcSearchString && attributes.sfdcSearchString.trim()) {
+      searchParameter = payload.task.attributes.sfdcSearchString;
     }
 
-    if (taskPayload.task.taskChannelUniqueName === 'voice' && direction === 'outbound') {
-      taskType = this.CALL_TYPE.OUTBOUND;
+    if (payload.task.taskChannelUniqueName === 'custom1' && direction === 'outbound') {
+      taskType = this.sfApi.CALL_TYPE.OUTBOUND;
       searchParameter = payload.task.attributes.to;
     }
 
     return this.sfApi.getAppViewInfo({
       callback: response => {
-        const responseReturnedValue = response && response.returnValue;
-        const currentRecordId = responseReturnedValue && responseReturnedValue.recordId;
 
         if (typeof(payload.task.attributes.sfdcUrl) !== 'undefined') {
           console.log('Calling screenPop action');
           console.log('type: sforce.opencti.SCREENPOP_TYPE.URL');
-          console.log(`params: { url: ${taskPayload.task.attributes.sfdcUrl} }`);
+          console.log(`params: { url: ${payload.task.attributes.sfdcUrl} }`);
 
           let screenPopUrl = payload.task.attributes.sfdcUrl;
           const taskSid = payload.task.taskSid;
@@ -136,23 +171,24 @@ export class SFDCIntegration {
           screenPopUrl = screenPopUrl.includes('?') ? `${screenPopUrl}&taskSid=${taskSid}&channelSid=${channelSid}` : `${screenPopUrl}?taskSid=${taskSid}&channelSid=${channelSid}`
 
           this.sfApi.screenPop({
-            type: window.sforce.opencti.SCREENPOP_TYPE.URL,
+            type: this.sfApi.SCREENPOP_TYPE.URL,
             params : { url: screenPopUrl }
           })
 
-        } else if (typeof(taskPayload.task.attributes.sfdcObjectId) !== 'undefined') {
+        } else if (typeof(payload.task.attributes.sfdcObjectId) !== 'undefined') {
           console.log('Calling screenPop action');
           console.log('type: sforce.opencti.SCREENPOP_TYPE.SOBJECT');
-          console.log(`params : { recordId: ${taskPayload.task.attributes.sfdcObjectId} }`);
+          console.log(`params : { recordId: ${payload.task.attributes.sfdcObjectId} }`);
 
           this.sfApi.screenPop({
-            type: window.sforce.opencti.SCREENPOP_TYPE.SOBJECT,
-            params : { recordId: taskPayload.task.attributes.sfdcObjectId }
+            type: this.sfApi.SCREENPOP_TYPE.SOBJECT,
+            params : { recordId: payload.task.attributes.sfdcObjectId }
           })
 
         } else {
           console.log('Calling searchAndScreenPop action');
           console.log(`searchParams: ${searchParameter}`);
+          console.log(taskType);
 
           this.sfApi.searchAndScreenPop({
             searchParams: searchParameter,
@@ -160,35 +196,16 @@ export class SFDCIntegration {
             defaultFieldValues: {
               Phone: searchParameter,
             },
-            deferred: true,
+            deferred: false,
             callback: result => {
-              const screenPopData = result && result.returnValue && result.returnValue.SCREEN_POP_DATA;
-              const searchedRecordId = screenPopData && screenPopData.params && screenPopData.params.recordId;
 
-              if (
-                (searchedRecordId && searchedRecordId === currentRecordId) ||
-                (direction === 'outbound' && currentRecordId && responseReturnedValue.objectType)
-              ) {
-                const { recordId, objectType } = responseReturnedValue;
-                const returnValue = {
-                  returnValue: {
-                    [recordId]: {
-                      Id: recordId,
-                      RecordType: objectType,
-                    },
-                    SCREEN_POP_DATA: {
-                      params: {
-                        recordId,
-                      },
-                    },
-                  },
-                };
-                return;
-              }
-            },
+              console.log('Hitting the callback function');
+              console.log(result);
+
+            }
           });
         }
-      },
+      }
     });
   }
 

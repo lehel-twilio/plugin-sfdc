@@ -1,5 +1,4 @@
 import { FlexPlugin } from 'flex-plugin';
-import React from 'react';
 import { SFDCIntegration } from './SFDCIntegration';
 
 export default class SfdcPlugin extends FlexPlugin {
@@ -22,9 +21,6 @@ export default class SfdcPlugin extends FlexPlugin {
       isLightning ? sfdc.lightningLogActivity(payload) : sfdc.classicLogActivity(payload);
     })
 
-    //Initialize Click to Call
-    isLightning ? sfdc.lightningClickToCall() : sfdc.classicClickToCall();
-
     //hide the 3rd panel from Flex UI
     manager.updateConfig({
       componentProps: {
@@ -33,6 +29,5 @@ export default class SfdcPlugin extends FlexPlugin {
         },
       },
     });
-
   }
 }
